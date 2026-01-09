@@ -1,0 +1,35 @@
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Extension declaration and constants for A2A kyapay protocol."""
+
+from .types.config import KYAPAY_EXTENSION_URI
+
+
+def get_extension_declaration(
+    description: str = "Supports kyapay payments", required: bool = True
+) -> dict:
+    """Creates extension declaration for AgentCard."""
+    return {"uri": KYAPAY_EXTENSION_URI, "description": description, "required": required}
+
+
+def check_extension_activation(request_headers: dict) -> bool:
+    """Check if kyapay extension is activated via HTTP headers."""
+    extensions = request_headers.get("X-A2A-Extensions", "")
+    return KYAPAY_EXTENSION_URI in extensions
+
+
+def add_extension_activation_header(response_headers: dict) -> dict:
+    """Echo extension URI in response header to confirm activation."""
+    response_headers["X-A2A-Extensions"] = KYAPAY_EXTENSION_URI
+    return response_headers
