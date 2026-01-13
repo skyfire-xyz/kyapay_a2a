@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
+import os
 
 import click
 import uvicorn
@@ -30,7 +31,7 @@ logging.basicConfig(level=logging.INFO)
 @click.option("--host", "host", default="localhost")
 @click.option("--port", "port", default=10000)
 def main(host: str, port: int):
-    base_url = f"http://{host}:{port}"
+    base_url = os.getenv("PUBLIC_URL", f"http://{host}:{port}")
     base_path = "/agents"
     routes = create_agent_routes(base_url=base_url, base_path=base_path)
 
