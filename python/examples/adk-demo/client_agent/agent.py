@@ -11,15 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 import httpx
 
 # Local imports
 from client_agent._task_store import TaskStore
 from client_agent.client_agent import ClientAgent
 
+# Default to localhost for local development
+default_merchant_url = "http://localhost:10000/agents/merchant_agent"
+merchant_url = os.getenv("MERCHANT_AGENT_URL", default_merchant_url)
+
 root_agent = ClientAgent(
     remote_agent_addresses=[
-        "http://localhost:10000/agents/merchant_agent",
+        merchant_url,
     ],
     http_client=httpx.AsyncClient(timeout=30),
     # wallet=MockLocalWallet(),

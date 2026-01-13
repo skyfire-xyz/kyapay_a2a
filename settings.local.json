@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Skill(superpowers:brainstorming)",
+      "WebFetch(domain:docs.skyfire.xyz)",
+      "Bash(mkdir:*)",
+      "SlashCommand(/superpowers:write-plan)",
+      "Skill(superpowers:writing-plans)",
+      "Skill(superpowers:subagent-driven-development)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(python3:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(pytest:*)",
+      "Bash(uv run pytest:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
