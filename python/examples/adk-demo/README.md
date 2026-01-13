@@ -73,11 +73,10 @@ This will start the ADK web server, usually on `localhost:8000`. Open this URL i
 
 ### 4. Try the Payment Demo
 
-Once both servers are running and you've navigated to the web UI, you can test the KyaPay payment flow by selecting the `client_agent` and trying queries like:
+Once both servers are running and you've navigated to the web UI, you can test the KyaPay payment flow by selecting the `client_agent` and entering this prompt:
 
-- "Find a dataset for pickup truck sales in the US in 2024"
-- "I want to purchase the US Automobile Data - 2024 dataset"
-- "Search for automobile sales data and buy the cheapest one"
+   Find a dataset for pickup truck sales in US in the year 2024.
+   If dataset cost is under my budget of $0.005 then proceed with purchasing.
 
 The client agent will:
 1. Discover available merchants
@@ -232,26 +231,14 @@ Task(
 | `BUYER_TAG` | Optional buyer identifier | No |
 | `SELLER_SERVICE_ID` | Skyfire seller service UUID | Yes (server) |
 
-## Example Prompts
+## Example Prompt
 
 Try these prompts in the web UI:
 
-1. **Basic Purchase:**
-   ```
-   I want to buy the US Automobile Data - 2024 dataset
-   ```
-
-2. **Search and Purchase:**
+1. **Search and Purchase:**
    ```
    Find a dataset for pickup truck sales in US in the year 2024.
    If dataset cost is under my budget of $0.005 then proceed with purchasing.
-   ```
-
-3. **Browse and Decide:**
-   ```
-   What datasets do you have available?
-   Show me details for the 2025 dataset.
-   I'll take it!
    ```
 
 ## Code Structure
