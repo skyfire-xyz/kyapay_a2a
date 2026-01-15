@@ -11,3 +11,4 @@ __pycache__
 *.pyzwz
 Claude.md
 docs/*
+settings.local.json

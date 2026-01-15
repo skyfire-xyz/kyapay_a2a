@@ -56,6 +56,15 @@ No blockchain wallets. No gas fees. Just agents transacting.
 
 ---
 
+
+## Readmes
+
+| Resource | Description |
+|----------|-------------|
+| [**Demo Readme**](python/examples/adk-demo/README.md) | Full end-to-end demo documentation |
+| [**Library Readme**](python/kyapay_a2a/README.md) | Core library with types, helpers, and executors |
+---
+
 ## Usage (Python)
 
 **Install:**
