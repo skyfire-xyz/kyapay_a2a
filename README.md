@@ -67,6 +67,8 @@ No blockchain wallets. No gas fees. Just agents transacting.
 
 ## Usage (Python)
 
+**Note that currently the extension library works with Python versions < 3.14.**
+
 **Install:**
 ```bash
 cd python/kyapay_a2a && uv pip install -e .

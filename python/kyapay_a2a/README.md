@@ -16,6 +16,8 @@ KyaPay enables AI agents to monetize services through a simple, secure payment f
 
 ## Installation
 
+**Note that currently the extension library works with Python versions < 3.14.**
+
 ```bash
 cd python/kyapay_a2a
 uv pip install -e .
