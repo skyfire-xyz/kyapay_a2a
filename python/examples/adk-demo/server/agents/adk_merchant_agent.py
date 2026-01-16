@@ -153,14 +153,13 @@ class AdkMerchantAgent(BaseAgent):
         """Creates the AgentCard for this agent."""
         skills = [
             AgentSkill(
-                id="get_product_info",
-                name="Get Product Price and Payment Info",
-                description="Provides the price and kyapay payment requirements for any given product.",
-                tags=["pricing", "product", "kyapay", "merchant"],
+                id="get_dataset_payment_info",
+                name="Get Dataset Payment Info",
+                description="Provides the price and kyapay payment requirements for any dataset in internal datastore.",
+                tags=["pricing", "datasets", "kyapay", "merchant"],
                 examples=[
-                    "How much for a new laptop?",
-                    "I want to buy a red stapler.",
-                    "Can you give me the price for a copy of 'Moby Dick'?",
+                    "How much for the US Automobile Data - 2024 dataset? If under my budget of $0.005, then proceed with purchasing.",
+                    "Buy me the US Automobile Data - 2025 dataset.",
                 ],
             )
         ]
