@@ -17,7 +17,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 
-KYAPAY_EXTENSION_URI = "https://github.com/skyfire-ammar/skyfire-solutions-a2a-extension/v0.1"
+KYAPAY_EXTENSION_URI = "https://github.com/skyfire-xyz/a2a-kyapay/tree/main/v0.1"
 
 
 class KyaPayExtensionConfig(BaseModel):
