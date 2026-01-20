@@ -11,10 +11,10 @@ The reusable, core logic for the KyaPay protocol is encapsulated in the `kyapay_
 ## How to Run the Demo
 
 ### Prerequisites
-- Python 3.11+
+- Python 3.11+ < 3.14
 - `uv` (for environment and package management)
 - Google API key (you can create one [here](https://ai.google.dev/gemini-api/docs/api-key))
-- Skyfire API keys (buyer and seller)
+- Follow the [Skyfire Platform Setup Guide](https://docs.skyfire.xyz/docs/introduction) to create Skyfire API key, seller service, and get seller api key. 
 
 ### 1. Setup the Environment
 
@@ -29,14 +29,14 @@ Set your API keys as environment variables:
 
 > **Warning:** Do not hardcode or commit your API keys. The commands below set the variables for the current session only. For persistence, add them to your shell's startup file (e.g., `~/.bashrc`, `~/.zshrc`) or use a `.env` file.
 
-**Linux/macOS:**
+**Linux/macOS .env**
 ```bash
-export GOOGLE_API_KEY="your_google_api_key"
-export SKYFIRE_API_KEY="your_buyer_api_key"
-export SKYFIRE_SELLER_API_KEY="your_seller_api_key"
-export SKYFIRE_API_HOST="https://api.skyfire.xyz"
-export BUYER_TAG="demo-buyer"
-export SELLER_SERVICE_ID="your-seller-service-uuid"
+GOOGLE_API_KEY="your_google_api_key"
+SKYFIRE_API_KEY="your_buyer_api_key"
+SKYFIRE_SELLER_API_KEY="your_seller_api_key"
+SKYFIRE_API_HOST="https://api.skyfire.xyz"
+BUYER_TAG="demo-buyer"
+SELLER_SERVICE_ID="your-seller-service-uuid"
 ```
 
 **Windows (PowerShell):**

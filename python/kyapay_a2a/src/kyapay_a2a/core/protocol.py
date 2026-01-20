@@ -35,8 +35,8 @@ from ..types import (
 logger = logging.getLogger(__name__)
 
 # Skyfire JWT verification constants
-JWKS_URL = "https://app-qa.skyfire.xyz/.well-known/jwks.json"
-JWT_ISSUER = "https://app-qa.skyfire.xyz"
+JWKS_URL = "https://app.skyfire.xyz/.well-known/jwks.json"
+JWT_ISSUER = "https://app.skyfire.xyz"
 ALGORITHMS = ["ES256"]
 
 
@@ -143,8 +143,14 @@ async def create_token(
 async def verify_token(
     token: KyaPayToken,
     requirements: KyaPayRequirements,
+    audience: Optional[str] = None,
 ) -> KyaPayVerifyResponse:
     """Verify kyapay token with full JWT validation.
+
+    Takes:
+    Token: The kyapay token to verify
+    Requirements: The payment requirements
+    Audience: The audience seller service id to verify the token against
 
     Performs:
     - JWKS signature verification
@@ -154,6 +160,7 @@ async def verify_token(
     - Amount/price validation against requirements
     - UUID validation for jti/sub
     - Email validation for buyer identity
+    - ensure the ENV is production
     """
     if not token.token:
         return KyaPayVerifyResponse(
@@ -173,13 +180,23 @@ async def verify_token(
 
     # Decode and verify JWT
     try:
-        payload = jwt.decode(
-            token.token,
-            jwks,
-            algorithms=ALGORITHMS,
-            issuer=JWT_ISSUER,
-            options={"verify_aud": False},
-        )
+
+        if audience:
+            payload = jwt.decode(
+                token.token,
+                jwks,
+                algorithms=ALGORITHMS,
+                issuer=JWT_ISSUER,
+                audience=audience,
+            )
+        else:
+            payload = jwt.decode(
+                token.token,
+                jwks,
+                algorithms=ALGORITHMS,
+                issuer=JWT_ISSUER,
+                options={"verify_aud": False},
+            )
 
         # Verify token type header
         protected_header = jwt.get_unverified_header(token.token)
@@ -207,11 +224,11 @@ async def verify_token(
         )
 
     # Validate environment (production only)
-    # if payload.get("env") != "production":
-    #     return KyaPayVerifyResponse(
-    #         is_valid=False,
-    #         invalid_reason=f"Invalid environment: {payload.get('env')}"
-    #     )
+    if payload.get("env") != "production":
+        return KyaPayVerifyResponse(
+            is_valid=False,
+            invalid_reason=f"Invalid environment: {payload.get('env')}"
+        )
 
     # Validate timestamps
     now = int(time.time())
@@ -252,6 +269,14 @@ async def verify_token(
             return KyaPayVerifyResponse(
                 is_valid=False,
                 invalid_reason="Token amount must be a positive number"
+            )
+
+        # Validate currency is USD
+        cur = payload.get("cur")
+        if cur != "USD":
+            return KyaPayVerifyResponse(
+                is_valid=False,
+                invalid_reason=f"Invalid currency: expected USD, got {cur}"
             )
 
         # Validate amount matches requirements

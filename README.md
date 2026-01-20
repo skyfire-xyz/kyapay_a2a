@@ -120,6 +120,8 @@ Use the core for fine-grained control, or wrap your agent with `KyaPayServerExec
 - [Skyfire](https://skyfire.xyz) — Payment infrastructure for AI agents
 - [KyaPay Protocol](https://kyapay.gitbook.io/kyapay) — The underlying payment protocol spec
 
+Please email us if you think there should be a pip package for this extension opensource@skyfire.xyz
+
 ---
 
 ## License
