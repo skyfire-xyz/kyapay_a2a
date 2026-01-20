@@ -87,7 +87,7 @@ The client agent will:
 6. Submit the token to the merchant
 7. Receive the download URL for the purchased dataset
 
-![Demo Purchase Flow](assets/buy_banana.png)
+![Complete Sequence Diagram](images/sequence.png)
 
 ## Architectural Flow
 
@@ -203,22 +203,7 @@ Task(
 )
 ```
 
-## Key Differences from Traditional Payment Systems
 
-### No Blockchain Wallets
-- Uses JWT tokens instead of blockchain signatures
-- No private keys for users to manage
-- No gas fees or transaction delays
-
-### API-Based
-- Token creation via Skyfire API (`POST /v1/tokens`)
-- Token verification via JWKS (JWT signature validation)
-- Token charging via Skyfire API (`POST /v1/tokens/{id}/charge`)
-
-### Simpler Integration
-- Exception-based payment requests
-- Automatic executor wrapping
-- No wallet integration needed
 
 ## Environment Variables
 
