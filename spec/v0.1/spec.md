@@ -11,7 +11,7 @@ This specification defines the required data structures and state machine for JW
 The canonical URI for this version of the extension is:
 
 ```
-https://github.com/skyfire-xyz/a2a-kyapay/tree/main/v0.1
+https://github.com/skyfire-xyz/a2a-kyapay/tree/main/spec/v0.1
 ```
 
 Implementations of this extension MUST use this URI for declaration and activation.
@@ -25,7 +25,7 @@ Agents that support this extension MUST declare it in the `extensions` array of 
   "capabilities": {
     "extensions": [
       {
-        "uri": "https://github.com/skyfire-xyz/a2a-kyapay/tree/main/v0.1",
+        "uri": "https://github.com/skyfire-xyz/a2a-kyapay/tree/main/spec/v0.1",
         "description": "Supports payments using the KyaPay protocol via Skyfire API.",
         "required": true
       }
@@ -43,7 +43,7 @@ Setting `required: true` is recommended. This signals to clients that they **MUS
 Clients MUST request activation of this extension by including its URI in the `X-A2A-Extensions` HTTP header:
 
 ```
-X-A2A-Extensions: https://github.com/skyfire-xyz/a2a-kyapay/tree/main/v0.1
+X-A2A-Extensions: https://github.com/skyfire-xyz/a2a-kyapay/tree/main/spec/v0.1
 ```
 
 Servers MAY echo this header in responses to confirm activation.
