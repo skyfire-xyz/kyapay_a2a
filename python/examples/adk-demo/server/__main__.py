@@ -19,10 +19,10 @@ import uvicorn
 from dotenv import load_dotenv
 from starlette.applications import Starlette
 
+load_dotenv()
 # Local imports
 from server.agents.routes import create_agent_routes
 
-load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 

@@ -46,7 +46,8 @@ class AdkMerchantAgent(BaseAgent):
     def __init__(
         self, seller_service_id: str = None
     ):
-        self._seller_service_id = seller_service_id or os.getenv("SELLER_SERVICE_ID", "8a507c77-e2da-4847-b339-cca29576d55a")
+        self._seller_service_id = seller_service_id or os.getenv("SELLER_SERVICE_ID", "")
+        print("seller_service_id", self._seller_service_id)
         self.kyapay = KyaPayUtils()
     
     async def search_datasets(
