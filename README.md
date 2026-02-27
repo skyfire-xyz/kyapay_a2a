@@ -123,6 +123,7 @@ Use the core for fine-grained control, or wrap your agent with `KyaPayServerExec
 - [KYAPay Protocol](https://www.kyapay.ai/) — Open identity-linked payment protocol for agentic AI
 - [A2A Protocol](https://github.com/a2aproject/a2a-python) — The agent-to-agent protocol
 - [Skyfire](https://skyfire.xyz) — Payment infrastructure for AI agents
+- [Video Demo](https://youtu.be/EeG76yh_BQw?si=T0tP-Kn3iJPDWOBK) - Video Demo of A2A Agents Transacting Using The Extension
 
 Please email us if you think there should be a pip package for this extension opensource@skyfire.xyz
 
