@@ -53,7 +53,7 @@ No blockchain wallets. No gas fees. Just agents transacting.
 | Resource | Description |
 |----------|-------------|
 | [**🚀 Live Demo**](https://a2a-kyapay-demo.skyfire.xyz) | Try the interactive demo (no setup required) |
-| [**🎥 Video Demo**](https://www.loom.com/share/88de9c1f847a468e95cd75cb2a944ba4) | Watch the full payment flow walkthrough |
+| [**🎥 Video Demo**](https://youtu.be/EeG76yh_BQw) | Watch the full payment flow walkthrough |
 | [**Specification**](spec/v0.1/spec.md) | Full protocol specification |
 | [**Python Library**](python/kyapay_a2a/) | Core library with types, helpers, and executors |
 | [**ADK Demo**](python/examples/adk-demo/) | Working example with merchant + client agents |
