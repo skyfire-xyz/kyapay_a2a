@@ -1,4 +1,4 @@
-# KYAPay: Payments for A2A Agents
+# KYAPay: Identity + Payments for A2A Agents
 
 
 KYAPay is an **extension** for the [A2A protocol](https://github.com/a2aproject/a2a-python) that adds JWT token-based payments via [Skyfire](https://skyfire.xyz). Merchant agents can monetize their skills; client agents can pay for them automatically.
