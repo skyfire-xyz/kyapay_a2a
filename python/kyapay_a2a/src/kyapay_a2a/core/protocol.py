@@ -257,14 +257,16 @@ async def verify_token(
 
     # Validate payment fields (for pay and kya+pay tokens)
     if requirements.token_type in ["pay", "kya+pay"]:
-        value = _to_int(payload.get("value"))
+        # Skyfire JWTs use compact claim names (`val`, `amt`).
+        # Keep backward compatibility with legacy keys (`value`, `amount`).
+        value = _to_int(payload.get("val", payload.get("value")))
         if value is None or value <= 0:
             return KyaPayVerifyResponse(
                 is_valid=False,
                 invalid_reason="Token value must be a positive integer"
             )
 
-        amount = _to_decimal(payload.get("amount"))
+        amount = _to_decimal(payload.get("amt", payload.get("amount")))
         if amount is None or amount <= 0:
             return KyaPayVerifyResponse(
                 is_valid=False,
