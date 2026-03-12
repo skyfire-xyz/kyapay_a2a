@@ -210,7 +210,13 @@ async def verify_token(
         }
         expected_typ = expected_typ_map.get(requirements.token_type)
 
-        if typ != expected_typ:
+        if not isinstance(typ, str) or not isinstance(expected_typ, str):
+            return KyaPayVerifyResponse(
+                is_valid=False,
+                invalid_reason=f"Invalid token type: expected {expected_typ}, got {typ}"
+            )
+
+        if typ.strip().lower() != expected_typ.strip().lower():
             return KyaPayVerifyResponse(
                 is_valid=False,
                 invalid_reason=f"Invalid token type: expected {expected_typ}, got {typ}"
