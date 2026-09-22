@@ -344,6 +344,46 @@ The `KyaPayServerExecutor` automatically:
 }
 ```
 
+## Nano (XNO) settlement rail
+
+Skyfire's KYAPay settles on a closed US-dollar ledger by default. This repository
+also ships an optional **peer-to-peer Nano (XNO) rail** so a merchant can offer a
+feeless, sub-second, self-custodial alternative in addition to a Skyfire token.
+Adding it is additive and non-breaking — the default flow is unchanged.
+
+```python
+from kyapay_a2a.rails import NanoRail, create_nano_payment_requirement
+
+# Merchant publishes a Nano payment requirement (parallel to a Skyfire token):
+requirement = create_nano_payment_requirement(
+    price_usd="1.00",
+    resource="/api/service",
+    nano_address="nano_1qjz76gqzwq9segqad9an3xtdkx5qxj99xft68yfrtxxsayq3fn3miqhow3n",
+)
+
+# Quote and settle on the Nano rail:
+rail = NanoRail()
+quote = rail.quote(1.00)          # fee $0.00, finality 0.3s
+result = rail.pay(
+    destination=requirement["nano_address"],
+    amount_raw="1000000000000000000000000",
+)
+print(result.settled, result.block_hash)   # True <block hash>
+```
+
+Quote (`fee_usd=0`, `finality_s=0.3`) and payment go through a pluggable `rpc`
+seam, so the example and tests run with **no wallet and no keys** — the shipped
+stub never touches the live network. To go live, point `rpc` at a real Nano RPC
+(e.g. `rpc.nano.to`) or wrap an existing Nano x402 client (e.g. `x402nano-exact`
+/ `feeless402`), which this rail reuses rather than rebuilding.
+
+Run the two-rail comparison:
+
+```bash
+cd python/kyapay_a2a
+python examples/nano_rail.py
+```
+
 ## Testing
 
 ```bash
