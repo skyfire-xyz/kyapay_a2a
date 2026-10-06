@@ -41,7 +41,7 @@ jobs:
           cache-dependency-glob: python/examples/adk-demo/uv.lock
       - run: uv sync --locked
       - run: uv run --no-sync python -m compileall -q -x '(^|/)\.venv/' .
-      - run: uv run --no-sync python -c "import server"
+      - run: uv run --no-sync python -c "import server.__main__"
 
   ci:
     name: ci
