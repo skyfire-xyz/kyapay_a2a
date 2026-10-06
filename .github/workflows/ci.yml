@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  kyapay-a2a:
+    name: kyapay-a2a
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python/kyapay_a2a
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: python/kyapay_a2a/uv.lock
+      - run: uv sync --locked
+      - run: uv run --no-sync pytest -q
+
+  adk-demo:
+    name: adk-demo
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python/examples/adk-demo
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: python/examples/adk-demo/uv.lock
+      - run: uv sync --locked
+      - run: uv run --no-sync python -m compileall -q -x '(^|/)\.venv/' .
+      - run: uv run --no-sync python -c "import server.__main__"
+
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    needs: [kyapay-a2a, adk-demo]
+    if: always()
+    steps:
+      - run: |
+          if [ "${{ needs.kyapay-a2a.result }}" != "success" ] || [ "${{ needs.adk-demo.result }}" != "success" ]; then
+            echo "one or more packages failed" >&2
+            exit 1
+          fi
