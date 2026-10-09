@@ -29,15 +29,20 @@ confirmed block for the requested amount and destination is observed; anything
 ambiguous is reported as not settled rather than assumed paid.
 """
 
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from decimal import ROUND_DOWN, Decimal, localcontext
+from decimal import ROUND_DOWN, Decimal, InvalidOperation, localcontext
 from threading import Lock
 from typing import Any
 
 # Nano has 10^30 raw per whole XNO.
 RAWS_PER_XNO = 10**30
+
+# Each requirement adds a random tag below this many raw to its amount, so a
+# block paid for one requirement cannot match another (10^6 raw is 10^-24 XNO).
+AMOUNT_TAG_SPAN = 10**6
 
 
 def usd_to_raw(price_usd: str | float, xno_usd: str | float) -> str:
@@ -50,18 +55,28 @@ def usd_to_raw(price_usd: str | float, xno_usd: str | float) -> str:
     Returns:
         The exact raw amount (integer raw units) as a decimal string, computed
         with ``Decimal`` so no floating-point error creeps into the raw count.
-        A price smaller than one raw rounds down to ``"0"`` — the caller should
-        treat a zero raw amount as unpayable rather than settle for nothing.
+        Rounds down to whole raw.
+
+    Raises:
+        ValueError: when the price or rate is not a positive number, or the
+            price is smaller than one raw at this rate (nothing payable).
     """
-    price = Decimal(str(price_usd))
-    rate = Decimal(str(xno_usd))
-    if rate <= 0:
+    try:
+        price = Decimal(str(price_usd))
+        rate = Decimal(str(xno_usd))
+    except InvalidOperation as exc:
+        raise ValueError(f"not a number: {price_usd!r} / {xno_usd!r}") from exc
+    if not rate.is_finite() or rate <= 0:
         raise ValueError("xno_usd must be positive")
+    if not price.is_finite() or price <= 0:
+        raise ValueError("price_usd must be positive")
     # Default Decimal precision (28 digits) is too small for 30-decimal raw
     # amounts; multiply before dividing, at a precision that keeps every digit.
     with localcontext() as ctx:
         ctx.prec = 80
         raw = (price * RAWS_PER_XNO / rate).to_integral_value(rounding=ROUND_DOWN)
+    if raw <= 0:
+        raise ValueError("price_usd is smaller than one raw at this rate")
     return str(int(raw))
 
 
@@ -100,6 +115,12 @@ class NanoRail:
     the merchant's advertised requirement. This **fails closed** — no confirmed
     block, no settlement.
 
+    ``settle`` is the entry point for a requirement built by ``requirement``:
+    it refuses an expired requirement, settles each requirement at most once,
+    and checks the block against that requirement's own (tagged) amount, so a
+    block paid for one requirement cannot be claimed for another. ``verify``
+    is the lower-level check against a bare destination and amount.
+
     ``rpc`` is any callable that accepts an RPC request dict and returns the
     JSON-RPC response dict. A real integration passes rpc.nano.to (or wraps an
     existing Nano x402 client such as ``x402nano-exact`` / ``feeless402``).
@@ -107,7 +128,8 @@ class NanoRail:
     A Nano block is immutable, so one block hash could otherwise authorize
     repeated deliveries. ``verify`` therefore *consumes* the hash: ``claim`` is
     called once per successful verification and must return ``True`` only the
-    first time a hash is claimed (atomically). The default is an in-process set
+    first time a key is claimed (atomically); ``settle`` also claims
+    ``"requirement:<requirement_id>"``. The default is an in-process set
     guarded by a lock; a multi-process merchant must pass a claim backed by
     shared storage (e.g. a unique-key insert).
     """
@@ -256,6 +278,53 @@ class NanoRail:
             finality_s=0.3,
         )
 
+    def settle(
+        self,
+        requirement: dict[str, Any],
+        block_hash: str,
+        *,
+        now: datetime | None = None,
+    ) -> NanoPaymentResult:
+        """Settle ``requirement`` with the buyer's block ``block_hash``.
+
+        Args:
+            requirement: a dict from ``requirement`` /
+                ``create_nano_payment_requirement``.
+            block_hash: the hash of the buyer's send block.
+            now: the current time (for tests); defaults to UTC now.
+
+        Raises:
+            PaymentNotConfirmed: when the requirement is malformed, expired or
+            already settled, or ``verify`` refuses the block.
+        """
+        if not isinstance(requirement, dict) or requirement.get("rail") != self.name:
+            raise PaymentNotConfirmed("not a Nano payment requirement")
+        requirement_id = requirement.get("requirement_id")
+        destination = requirement.get("nano_address")
+        amount_raw = requirement.get("amount_raw")
+        if not requirement_id or not destination or not amount_raw:
+            raise PaymentNotConfirmed(
+                "requirement lacks requirement_id, nano_address or amount_raw"
+            )
+        expires_at = requirement.get("expires_at")
+        if expires_at:
+            try:
+                deadline = datetime.fromisoformat(str(expires_at))
+            except ValueError as exc:
+                raise PaymentNotConfirmed(
+                    "requirement has an unreadable expires_at"
+                ) from exc
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=timezone.utc)
+            if (now or datetime.now(timezone.utc)) >= deadline:
+                raise PaymentNotConfirmed("payment requirement has expired")
+        result = self.verify(
+            block_hash, destination=str(destination), amount_raw=str(amount_raw)
+        )
+        if not self._claim(f"requirement:{requirement_id}"):
+            raise PaymentNotConfirmed("payment requirement was already settled")
+        return result
+
     # Pay is intentionally not a signing operation on the merchant side. The
     # buyer broadcasts the send; a merchant only verifies. We keep a thin
     # ``pay`` alias to ``verify`` for callers that already hold the buyer's
@@ -265,10 +334,23 @@ class NanoRail:
         destination: str,
         amount_raw: str,
         block_hash: str | None = None,
+        requirement: dict[str, Any] | None = None,
     ) -> NanoPaymentResult:
-        """Settle by verifying a buyer's block; fails closed if unconfirmed."""
+        """Settle by verifying a buyer's block; fails closed if unconfirmed.
+
+        With ``requirement`` this is ``settle`` (expiry and single use are
+        enforced, and ``destination``/``amount_raw`` must match it).
+        """
         if not block_hash:
             raise PaymentNotConfirmed("no block hash to verify - nothing was settled")
+        if requirement is not None:
+            if requirement.get("nano_address") != destination or str(
+                requirement.get("amount_raw")
+            ) != str(amount_raw):
+                raise PaymentNotConfirmed(
+                    "destination/amount differ from the requirement"
+                )
+            return self.settle(requirement, block_hash)
         return self.verify(
             block_hash,
             destination=destination,
@@ -287,9 +369,12 @@ def create_nano_payment_requirement(
     """Create a Nano-payment requirement mirroring ``create_payment_requirements``.
 
     This is the merchant-side counterpart for a seller that wants to accept
-    Nano in addition to (or instead of) a Skyfire token. It returns a plain
-    dict so it can be attached to a ``KyaPayMetadata`` message without changing
-    the core protocol types.
+    Nano in addition to (or instead of) a Skyfire token. It is deliberately
+    not a ``KyaPayRequirements``: that model requires a Skyfire
+    ``seller_service_id`` and a token type, which a Nano payment has no use
+    for, so the existing token flow cannot consume it and this rail does not
+    pretend otherwise. It returns a plain dict that a merchant offers next to
+    its ``KyaPayRequirements`` and later passes to ``NanoRail.settle``.
 
     Args:
         price_usd: US-dollar price as a decimal string (e.g. ``"0.01"``)
@@ -300,10 +385,19 @@ def create_nano_payment_requirement(
         expires_in_seconds: optional payment window
 
     Returns:
-        A dict describing the Nano payment requirement, including the exact
-        raw amount the rail will accept (``amount_raw``) derived from
-        ``price_usd`` so the advertised price and the settled amount are bound.
+        A dict describing the Nano payment requirement: a random
+        ``requirement_id`` and the exact raw amount the rail will accept
+        (``amount_raw``), which is ``usd_to_raw(price_usd)`` plus a random tag
+        of 1 to ``AMOUNT_TAG_SPAN - 1`` raw. The tag makes the amount unique to
+        this requirement, so a block paid for it settles nothing else.
+
+    Raises:
+        ValueError: for a non-positive or sub-raw price, or a non-positive
+            ``expires_in_seconds``.
     """
+    base_raw = int(usd_to_raw(price_usd, xno_usd))
+    if expires_in_seconds is not None and expires_in_seconds <= 0:
+        raise ValueError("expires_in_seconds must be positive")
     expires_at = None
     if expires_in_seconds:
         expires_at = (
@@ -313,7 +407,8 @@ def create_nano_payment_requirement(
     return {
         "rail": "nano-xno",
         "price_usd": price_usd,
-        "amount_raw": usd_to_raw(price_usd, xno_usd),
+        "amount_raw": str(base_raw + 1 + secrets.randbelow(AMOUNT_TAG_SPAN - 1)),
+        "requirement_id": secrets.token_hex(16),
         "resource": resource,
         "nano_address": nano_address,
         "description": description,

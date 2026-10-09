@@ -13,9 +13,12 @@
 # limitations under the License.
 """Tests for the Nano (XNO) settlement rail."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from kyapay_a2a.rails.nano import (
+    AMOUNT_TAG_SPAN,
     NanoPaymentResult,
     NanoQuote,
     NanoRail,
@@ -191,7 +194,8 @@ def test_rail_rate_drives_requirement_amount():
     rail = NanoRail(xno_usd="2.0")
     assert rail.amount_raw_for("1.00") == str(10**30 // 2)
     req = rail.requirement(price_usd="1.00", resource="/r", nano_address=DEST)
-    assert req["amount_raw"] == str(10**30 // 2)
+    base = 10**30 // 2
+    assert base < int(req["amount_raw"]) < base + AMOUNT_TAG_SPAN
 
 
 def test_usd_to_raw_conversion():
@@ -202,8 +206,22 @@ def test_usd_to_raw_conversion():
     assert usd_to_raw("0.01", "1.0") == str(10**28)
     # Rounds DOWN to whole raw, as documented: $1 at XNO=$3 is 333...3 raw.
     assert usd_to_raw("1", "3") == "3" * 30
-    # A price below one raw is zero (unpayable), never rounded up.
-    assert usd_to_raw("0.0000000000000000000000000000009", "1") == "0"
+
+
+@pytest.mark.parametrize(
+    "price", ["0", "-1", "0.0000000000000000000000000000009", "NaN", "abc"]
+)
+def test_usd_to_raw_rejects_unpayable_prices(price):
+    """Non-positive, sub-raw and non-numeric prices are refused, not settled."""
+    with pytest.raises(ValueError):
+        usd_to_raw(price, "1")
+    with pytest.raises(ValueError):
+        create_nano_payment_requirement(price, "/r", DEST)
+
+
+def test_requirement_rejects_non_positive_expiry():
+    with pytest.raises(ValueError):
+        create_nano_payment_requirement("1", "/r", DEST, expires_in_seconds=-5)
 
 
 def test_create_nano_payment_requirement_binds_amount():
@@ -216,7 +234,92 @@ def test_create_nano_payment_requirement_binds_amount():
     )
     assert requirement["rail"] == "nano-xno"
     assert requirement["price_usd"] == "0.01"
-    assert requirement["amount_raw"] == str(10**28)
+    assert 10**28 < int(requirement["amount_raw"]) < 10**28 + AMOUNT_TAG_SPAN
+    assert len(requirement["requirement_id"]) == 32
     assert requirement["nano_address"] == DEST
     assert requirement["resource"] == "/api/service"
     assert requirement["expires_at"] is None
+
+
+def ledger(*blocks):
+    """An rpc whose ledger holds the given {hash: amount} sends to DEST."""
+    amounts = dict(blocks)
+
+    def rpc(request):
+        amount = amounts.get(request["hash"])
+        return block_info(amount=amount) if amount else {"error": "block not found"}
+
+    return rpc
+
+
+def test_requirements_get_distinct_amounts_and_ids():
+    """Two requirements for the same price never share an amount or id."""
+    rail = NanoRail()
+    reqs = [rail.requirement("1.00", "/r", DEST) for _ in range(20)]
+    assert len({r["amount_raw"] for r in reqs}) == 20
+    assert len({r["requirement_id"] for r in reqs}) == 20
+
+
+def test_settle_confirms_its_own_requirement():
+    rail = NanoRail()
+    req = rail.requirement("1.00", "/r", DEST, expires_in_seconds=60)
+    rail._rpc = ledger(("h1", req["amount_raw"]))
+    result = rail.settle(req, "h1")
+    assert result.settled and result.amount_raw == req["amount_raw"]
+
+
+def test_block_for_one_requirement_does_not_settle_another():
+    """A payment observed on the public ledger cannot be claimed for another
+    requirement at the same price."""
+    rail = NanoRail()
+    paid = rail.requirement("1.00", "/r", DEST)
+    other = rail.requirement("1.00", "/r", DEST)
+    rail._rpc = ledger(("h1", paid["amount_raw"]))
+    with pytest.raises(PaymentNotConfirmed):
+        rail.settle(other, "h1")
+    assert rail.settle(paid, "h1").settled
+
+
+def test_requirement_settles_only_once():
+    """A second block for an already-settled requirement delivers nothing."""
+    rail = NanoRail()
+    req = rail.requirement("1.00", "/r", DEST)
+    rail._rpc = ledger(("h1", req["amount_raw"]), ("h2", req["amount_raw"]))
+    assert rail.settle(req, "h1").settled
+    with pytest.raises(PaymentNotConfirmed):
+        rail.settle(req, "h2")
+
+
+def test_expired_requirement_is_refused():
+    rail = NanoRail()
+    req = rail.requirement("1.00", "/r", DEST, expires_in_seconds=60)
+    rail._rpc = ledger(("h1", req["amount_raw"]))
+    later = datetime.now(timezone.utc) + timedelta(seconds=61)
+    with pytest.raises(PaymentNotConfirmed, match="expired"):
+        rail.settle(req, "h1", now=later)
+    # Refusing an expired requirement must not consume the block.
+    assert rail.settle(req, "h1").settled
+
+
+def test_pay_with_requirement_enforces_expiry_and_match():
+    rail = NanoRail()
+    req = rail.requirement("1.00", "/r", DEST, expires_in_seconds=60)
+    req_expired = dict(req, expires_at="2000-01-01T00:00:00+00:00")
+    rail._rpc = ledger(("h1", req["amount_raw"]))
+    with pytest.raises(PaymentNotConfirmed, match="expired"):
+        rail.pay(DEST, req["amount_raw"], "h1", requirement=req_expired)
+    with pytest.raises(PaymentNotConfirmed):
+        rail.pay(DEST, "1", "h1", requirement=req)
+    assert rail.pay(DEST, req["amount_raw"], "h1", requirement=req).settled
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [{"rail": "skyfire-usd"}, {"requirement_id": ""}, {"expires_at": "soon"}],
+)
+def test_malformed_requirement_fails_closed(broken):
+    rail = NanoRail()
+    req = rail.requirement("1.00", "/r", DEST)
+    rail._rpc = ledger(("h1", req["amount_raw"]))
+    with pytest.raises(PaymentNotConfirmed):
+        rail.settle(dict(req, **broken), "h1")

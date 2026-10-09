@@ -17,7 +17,7 @@ This is the merchant-side view: a KYAPay seller may accept either a Skyfire
 JWT token or a peer-to-peer Nano transfer. It shows the *same* $ amount on both
 rails so the cost and finality difference is visible in one place. The Nano
 settlement is a verification, not a signing step: this example supplies a stub
-``rpc`` that confirms the exact raw amount for the advertised price.
+``rpc`` that confirms a block for the exact raw amount of the requirement.
 
 Run (no wallet, no keys — the Nano rail verifies against a local confirmation
 stub that fails closed when no block is found):
@@ -38,20 +38,21 @@ PRICE_USD = "1.00"
 # live quote: the raw amount below is only "$1.00" at this rate.
 XNO_USD = "1.0"
 NANO_ADDRESS = "nano_1qjz76gqzwq9segqad9an3xtdkx5qxj99xft68yfrtxxsayq3fn3miqhow3n"
-# The exact raw amount for $1.00 at XNO=$1.00 — must match usd_to_raw.
-AMOUNT_RAW = str(10**30)
+# The raw amount the buyer sent; set once the requirement is published (the
+# stub below plays a buyer who paid exactly that requirement's amount).
+PAID = {"amount_raw": ""}
 
 
 def _confirming_rpc(request):
     """Local confirmation stub - returns a matching block so the example settles.
 
     In production, point the rail at a real Nano RPC (e.g. rpc.nano.to) and the
-    same ``verify`` read confirms the buyer's actual block from the ledger.
+    same ``block_info`` read confirms the buyer's actual block from the ledger.
     """
     if request.get("action") == "block_info":
         # Shape of a real block_info reply for a state send block.
         return {
-            "amount": AMOUNT_RAW,
+            "amount": PAID["amount_raw"],
             "confirmed": "true",
             "subtype": "send",
             "contents": {
@@ -81,7 +82,9 @@ def main() -> None:
         resource="/api/service",
         nano_address=NANO_ADDRESS,
         description="Payment required (Nano XNO rail)",
+        expires_in_seconds=300,
     )
+    PAID["amount_raw"] = nano_req["amount_raw"]
     quote = rail.quote(1.00)
     print("\n  rail     : nano-xno")
     print(f"  price    : ${PRICE_USD}")
@@ -89,14 +92,11 @@ def main() -> None:
     print(f"  fee      : ${quote.fee_usd:.6f}")
     print(f"  finality : {quote.finality_s:.1f}s")
 
-    # Settle on the Nano rail (verify the buyer's block for the exact amount).
+    # Settle the requirement with the buyer's block: refused once expired or
+    # already settled, and only a block for this requirement's amount matches.
     print("\n-- settling on the Nano rail --")
     try:
-        result = rail.verify(
-            "buyer_block_hash",
-            destination=nano_req["nano_address"],
-            amount_raw=nano_req["amount_raw"],
-        )
+        result = rail.settle(nano_req, "buyer_block_hash")
         print(f"  settled   : {result.settled}")
         print(f"  fee       : ${result.fee_usd:.6f}")
         print(f"  block ref : {result.block_hash}")
