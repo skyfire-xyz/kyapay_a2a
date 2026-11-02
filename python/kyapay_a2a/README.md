@@ -344,6 +344,81 @@ The `KyaPayServerExecutor` automatically:
 }
 ```
 
+## Nano (XNO) settlement rail
+
+Skyfire's KYAPay settles on a closed US-dollar ledger by default. This repository
+also ships an optional **peer-to-peer Nano (XNO) rail** so a merchant can offer a
+feeless, sub-second, self-custodial alternative in addition to a Skyfire token.
+Adding it is additive and non-breaking — the default flow is unchanged.
+
+```python
+from kyapay_a2a.rails import NanoRail
+
+# One rail, one XNO/USD rate (1.0 here is a placeholder: use a live quote).
+rail = NanoRail(rpc=my_rpc, xno_usd="1.0")
+
+# Merchant publishes a Nano payment requirement (parallel to a Skyfire token).
+# The requirement binds the advertised USD price to an exact raw amount,
+# converted with the rail's own rate plus a small random tag (under 10^6 raw).
+# The rail re-draws the tag if that amount is already outstanding for this
+# address (tracked per process by default; see below for several workers).
+requirement = rail.requirement(
+    price_usd="1.00",
+    resource="/api/service",
+    nano_address="nano_1qjz76gqzwq9segqad9an3xtdkx5qxj99xft68yfrtxxsayq3fn3miqhow3n",
+    expires_in_seconds=300,
+)
+
+quote = rail.quote(1.00)                    # fee $0.00, finality 0.3s
+# The buyer sends exactly requirement["amount_raw"] and hands back the hash.
+result = rail.settle(requirement, buyer_block_hash)  # 64 hex digits
+print(result.settled, result.block_hash)    # True <block hash>
+```
+
+Settlement is a **merchant-side verification, not a signer**: the buyer signs
+and broadcasts the send block; a merchant asks its `rpc` for that block's
+`block_info` and only reports `settled=True` when the node marks the block
+`confirmed`, it is a send, its recipient and top-level `amount` match the
+advertised requirement exactly, and the block hash has not been used before
+(one block pays for one delivery). `settle` also refuses an expired
+requirement and settles each requirement once. `settle` trusts the store's record of what it issued, not the dict the caller hands back (an edited id, address or amount is refused), and the block's own `local_timestamp` must fall between the issue and the expiry, so a late block for an expired requirement cannot pay a newer one that was given the same amount; a custom `OutstandingAmounts` must implement `issued_at`. A requirement is bound to its
+payment only by its exact amount at its address, so `requirement` reserves
+each amount in an `outstanding` store and re-draws on a collision (an amount
+is freed when its requirement settles or expires; one without an expiry holds
+it until settled). **Both the replay check and the amount store default to
+in-memory state shared by every `NanoRail` in the process** that is built
+without its own `claim=` / `outstanding=`, so two rails in one process refuse
+each other's used block hashes and settled requirements. That state does not
+leave the process: several processes or workers that settle payments to one
+address must pass a `claim` and an `OutstandingAmounts` backed by shared
+storage, such as unique-key inserts, or each use their own address. Otherwise
+two workers can issue the same amount and one payment could settle a
+requirement on each. Expiry is checked against the rail's own clock (`clock=`
+exists only for tests), never a time supplied with the settlement; only a
+missing or `None` `expires_at` means "no expiry" - any other value that is not
+an ISO 8601 time (including `""`, `0` or `False`) is refused. `verify`
+refuses an empty destination or amount, and any block hash that is not 64 hex
+digits, before reading the ledger; the hash is normalised (stripped, upper
+case) before it is looked up or consumed, so a re-cased or padded copy of a
+used hash is refused as a replay.
+Prices that are zero, negative or below one raw are rejected when the
+requirement is built. The requirement is a plain dict offered next to a
+`KyaPayRequirements`, not one: that model needs a Skyfire `seller_service_id`. This **fails closed** — an unconfigured
+rail or an unmatched block is never reported as paid. Quote (`fee_usd=0`,
+`finality_s=0.3`) and the confirmation read go through a pluggable `rpc` seam,
+so the example and tests run with **no wallet and no keys** — the shipped stub
+confirms nothing, and the example supplies a stub that confirms only the exact
+amount. To go live, point `rpc` at a real Nano RPC (e.g. `rpc.nano.to`) or wrap
+an existing Nano x402 client (e.g. `x402nano-exact` / `feeless402`), which this
+rail reuses rather than rebuilding.
+
+Run the two-rail comparison:
+
+```bash
+cd python/kyapay_a2a
+python examples/nano_rail.py
+```
+
 ## Testing
 
 ```bash
