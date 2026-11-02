@@ -49,6 +49,10 @@ AMOUNT_TAG_SPAN = 10**6
 # How many tags ``NanoRail.requirement`` draws before giving up.
 _TAG_ATTEMPTS = 64
 
+# A block's node-reported time may differ a little from this host's clock;
+# the issue-time check tolerates this much skew.
+BLOCK_CLOCK_SKEW = timedelta(seconds=30)
+
 # A Nano block hash: 32 bytes as 64 hex digits (canonical form is upper case).
 _BLOCK_HASH = re.compile(r"[0-9A-F]{64}")
 
@@ -134,6 +138,15 @@ class OutstandingAmounts(Protocol):
         """Free the reservation if ``requirement_id`` still holds it."""
         ...
 
+    def issued_at(
+        self, destination: str, amount_raw: str, requirement_id: str
+    ) -> datetime | None:
+        """When ``requirement_id`` reserved this amount, or ``None`` if it
+        does not currently hold it. ``settle`` trusts this record, never the
+        requirement dict the caller hands back, so a tampered id, address or
+        amount is refused and a block older than the issue is refused."""
+        ...
+
 
 class InMemoryClaims:
     """The default ``claim``: a set of consumed keys guarded by a lock.
@@ -168,8 +181,8 @@ class InMemoryOutstandingAmounts:
     """
 
     def __init__(self) -> None:
-        # (destination, amount_raw) -> (requirement_id, deadline or None)
-        self._entries: dict[tuple[str, str], tuple[str, datetime | None]] = {}
+        # (destination, amount_raw) -> (requirement_id, deadline or None, issued)
+        self._entries: dict[tuple[str, str], tuple[str, datetime | None, datetime]] = {}
         self._lock = Lock()
 
     def reserve(
@@ -181,13 +194,13 @@ class InMemoryOutstandingAmounts:
     ) -> bool:
         with self._lock:
             now = datetime.now(timezone.utc)
-            for held_key, (_, held_deadline) in list(self._entries.items()):
+            for held_key, (_, held_deadline, _) in list(self._entries.items()):
                 if held_deadline is not None and now >= held_deadline:
                     del self._entries[held_key]
             key = (destination, amount_raw)
             if key in self._entries:
                 return False
-            self._entries[key] = (requirement_id, deadline)
+            self._entries[key] = (requirement_id, deadline, now)
             return True
 
     def release(self, destination: str, amount_raw: str, requirement_id: str) -> None:
@@ -196,6 +209,17 @@ class InMemoryOutstandingAmounts:
             held = self._entries.get(key)
             if held is not None and held[0] == requirement_id:
                 del self._entries[key]
+
+    def issued_at(
+        self, destination: str, amount_raw: str, requirement_id: str
+    ) -> datetime | None:
+        with self._lock:
+            held = self._entries.get((destination, amount_raw))
+            if held is None or held[0] != requirement_id:
+                return None
+            if held[1] is not None and datetime.now(timezone.utc) >= held[1]:
+                return None
+            return held[2]
 
 
 # The process-wide default stores. Every ``NanoRail`` built without ``claim``
@@ -384,6 +408,8 @@ class NanoRail:
         *,
         destination: str,
         amount_raw: str,
+        not_before: datetime | None = None,
+        not_after: datetime | None = None,
     ) -> NanoPaymentResult:
         """Confirm a Nano payment block against the merchant's requirement.
 
@@ -394,6 +420,14 @@ class NanoRail:
             destination: the merchant's Nano (XNO) receive address.
             amount_raw: the raw amount the merchant expects (e.g. from
                 ``usd_to_raw`` of the advertised price).
+            not_before: when set, the block's own ``local_timestamp`` must be
+                at or after this time (less ``BLOCK_CLOCK_SKEW``): a block
+                older than the order cannot pay it. ``settle`` passes the
+                time the requirement was issued.
+            not_after: when set, the block's time must be at or before this
+                time (plus the skew): a late block cannot pay an expired
+                order. ``settle`` passes the requirement's expiry. A block
+                with no usable time is refused whenever either is set.
 
         Returns:
             A ``NanoPaymentResult`` with ``settled=True`` only when the ledger
@@ -433,6 +467,22 @@ class NanoRail:
             raise PaymentNotConfirmed(
                 f"amount mismatch: expected {amount_raw}, found {block_amount or 'none'}"
             )
+
+        if not_before is not None or not_after is not None:
+            try:
+                block_time = datetime.fromtimestamp(
+                    int(str(info.get("local_timestamp", ""))), timezone.utc
+                )
+            except (ValueError, OverflowError, OSError):
+                block_time = None
+            if block_time is None or block_time.year < 2015:
+                raise PaymentNotConfirmed("block has no usable local_timestamp")
+            if not_before is not None and block_time < not_before - BLOCK_CLOCK_SKEW:
+                raise PaymentNotConfirmed("block predates the payment requirement")
+            if not_after is not None and block_time > not_after + BLOCK_CLOCK_SKEW:
+                raise PaymentNotConfirmed(
+                    "block was made after the requirement expired"
+                )
 
         # State blocks carry the recipient in link_as_account; legacy send
         # blocks in destination. It must be present and exact.
@@ -500,8 +550,27 @@ class NanoRail:
                 deadline = deadline.replace(tzinfo=timezone.utc)
             if self._clock() >= deadline:
                 raise PaymentNotConfirmed("payment requirement has expired")
+        # Bind to what THIS store issued, not to the dict the caller returned:
+        # the id, address and amount must be a live reservation, and the block
+        # must have been made after the requirement was issued (and before it
+        # expired), so a late block for an expired order cannot pay a newer one
+        # that was handed the same amount.
+        issued = getattr(self._outstanding, "issued_at", None)
+        issued_at = (
+            issued(str(destination), str(amount_raw), str(requirement_id))
+            if callable(issued)
+            else None
+        )
+        if issued_at is None:
+            raise PaymentNotConfirmed(
+                "requirement was not issued by this rail's store (or is released)"
+            )
         result = self.verify(
-            block_hash, destination=str(destination), amount_raw=str(amount_raw)
+            block_hash,
+            destination=str(destination),
+            amount_raw=str(amount_raw),
+            not_before=issued_at,
+            not_after=deadline if expires_at is not None else None,
         )
         if not self._claim(f"requirement:{requirement_id}"):
             raise PaymentNotConfirmed("payment requirement was already settled")

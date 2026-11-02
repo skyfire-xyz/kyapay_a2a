@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for the Nano (XNO) settlement rail."""
 
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -76,12 +77,15 @@ def test_unconfigured_rail_fails_closed():
 AMOUNT = "1000000000000000000000000"
 
 
-def block_info(amount=AMOUNT, destination=DEST, confirmed="true", subtype="send"):
+def block_info(
+    amount=AMOUNT, destination=DEST, confirmed="true", subtype="send", at=None
+):
     """A block_info reply shaped like the real Nano RPC for a state send."""
     reply = {
         "amount": amount,
         "confirmed": confirmed,
         "subtype": subtype,
+        "local_timestamp": str(int(time.time()) if at is None else at),
         "contents": {"type": "state", "account": "nano_1buyer"},
     }
     if destination is not None:
@@ -405,6 +409,7 @@ def test_settled_and_expired_amounts_are_released(monkeypatch):
     store._entries[key] = (
         again["requirement_id"],
         datetime(2000, 1, 1, tzinfo=timezone.utc),
+        datetime(1999, 1, 1, tzinfo=timezone.utc),
     )
     assert rail.requirement("1.00", "/r", DEST)["amount_raw"] == req["amount_raw"]
 
@@ -551,6 +556,11 @@ def test_custom_outstanding_store_is_used():
         def release(self, destination, amount_raw, requirement_id):
             self.released.append((destination, amount_raw, requirement_id))
 
+        def issued_at(self, destination, amount_raw, requirement_id):
+            if (destination, amount_raw, requirement_id) in self.reserved:
+                return datetime.now(timezone.utc)
+            return None
+
     store = Store()
     rail = NanoRail(outstanding=store)
     req = rail.requirement("1.00", "/r", DEST, expires_in_seconds=60)
@@ -597,7 +607,7 @@ def test_rails_sharing_stores_settle_a_requirement_once():
     assert worker_a.settle(req, H1).settled
     with pytest.raises(PaymentNotConfirmed):
         worker_b.settle(req, H1)
-    with pytest.raises(PaymentNotConfirmed, match="already settled"):
+    with pytest.raises(PaymentNotConfirmed, match="already settled|not issued"):
         worker_b.settle(req, H2)
 
 
@@ -607,7 +617,7 @@ def test_default_rails_in_one_process_refuse_a_replay():
     a = NanoRail(rpc=lambda request: block_info())
     b = NanoRail(rpc=lambda request: block_info())
     assert a.verify(H, destination=DEST, amount_raw=AMOUNT).settled
-    with pytest.raises(PaymentNotConfirmed, match="already used"):
+    with pytest.raises(PaymentNotConfirmed, match="already used|not issued"):
         b.verify(H, destination=DEST, amount_raw=AMOUNT)
 
 
@@ -618,9 +628,9 @@ def test_default_rails_settle_a_requirement_once():
     req = a.requirement("1.00", "/r", DEST, expires_in_seconds=60)
     a._rpc = b._rpc = ledger((H1, req["amount_raw"]), (H2, req["amount_raw"]))
     assert a.settle(req, H1).settled
-    with pytest.raises(PaymentNotConfirmed, match="already used"):
+    with pytest.raises(PaymentNotConfirmed, match="already used|not issued"):
         b.settle(req, H1)
-    with pytest.raises(PaymentNotConfirmed, match="already settled"):
+    with pytest.raises(PaymentNotConfirmed, match="already settled|not issued"):
         b.settle(req, H2)
 
 
@@ -630,3 +640,86 @@ def test_injected_claim_store_is_not_the_default():
     b = NanoRail(rpc=lambda request: block_info(), claim=InMemoryClaims())
     assert a.verify(H, destination=DEST, amount_raw=AMOUNT).settled
     assert b.verify(H, destination=DEST, amount_raw=AMOUNT).settled
+
+
+def timed_ledger(amount, at):
+    """An rpc whose only block pays ``amount`` to DEST at unix time ``at``."""
+    return lambda request: block_info(amount=amount, at=at)
+
+
+def test_settle_binds_to_the_issued_requirement_not_the_callers_dict():
+    """A returned requirement whose id, address or amount was edited is not
+    one this rail issued, so no block can settle it."""
+    rail = NanoRail()
+    req = rail.requirement("1.00", "/r", DEST, expires_in_seconds=60)
+    other_amount = str(int(req["amount_raw"]) + 1)
+    rail._rpc = ledger((H1, req["amount_raw"]), (H2, other_amount))
+    forged = [
+        dict(req, requirement_id="f" * 32),
+        dict(req, nano_address="nano_1someoneelse"),
+        dict(req, amount_raw=other_amount),
+    ]
+    for bad in forged:
+        with pytest.raises(PaymentNotConfirmed, match="not issued"):
+            rail.settle(bad, H1)
+    assert rail.settle(req, H1).settled
+
+
+def test_late_block_cannot_pay_a_newer_requirement_with_the_same_amount(monkeypatch):
+    """Requirement A expires, its amount is handed to B; a block made after A
+    expired but before B was issued must not settle B."""
+    monkeypatch.setattr(nano.secrets, "randbelow", lambda n: 7)
+    rail = NanoRail()
+    a = rail.requirement("1.00", "/r", DEST, expires_in_seconds=1)
+    time.sleep(1.1)
+    b = rail.requirement("1.00", "/r", DEST, expires_in_seconds=60)
+    assert b["amount_raw"] == a["amount_raw"]
+    now = int(time.time())
+    rail._rpc = timed_ledger(b["amount_raw"], now - 120)
+    with pytest.raises(PaymentNotConfirmed, match="predates"):
+        rail.settle(b, H1)
+    rail._rpc = timed_ledger(b["amount_raw"], now)
+    assert rail.settle(b, H1).settled
+
+
+def test_block_made_after_expiry_is_refused():
+    rail = NanoRail()
+    req = rail.requirement("1.00", "/r", DEST, expires_in_seconds=60)
+    rail._rpc = timed_ledger(req["amount_raw"], int(time.time()) + 3600)
+    with pytest.raises(PaymentNotConfirmed, match="expired"):
+        rail.settle(req, H1)
+
+
+@pytest.mark.parametrize("stamp", ["", "0", "soon", None])
+def test_block_without_a_usable_time_is_refused_by_settle(stamp):
+    rail = NanoRail()
+    req = rail.requirement("1.00", "/r", DEST, expires_in_seconds=60)
+
+    def rpc(request):
+        reply = block_info(amount=req["amount_raw"])
+        if stamp is None:
+            del reply["local_timestamp"]
+        else:
+            reply["local_timestamp"] = stamp
+        return reply
+
+    rail._rpc = rpc
+    with pytest.raises(PaymentNotConfirmed, match="local_timestamp"):
+        rail.settle(req, H1)
+
+
+def test_store_without_issue_records_cannot_settle():
+    """A custom store that cannot say when a requirement was issued fails closed."""
+
+    class Bare:
+        def reserve(self, *args):
+            return True
+
+        def release(self, *args):
+            pass
+
+    rail = NanoRail(outstanding=Bare())
+    req = rail.requirement("1.00", "/r", DEST)
+    rail._rpc = ledger((H1, req["amount_raw"]))
+    with pytest.raises(PaymentNotConfirmed, match="not issued"):
+        rail.settle(req, H1)

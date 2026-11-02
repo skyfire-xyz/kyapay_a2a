@@ -27,6 +27,7 @@ stub that fails closed when no block is found):
 
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -55,6 +56,7 @@ def _confirming_rpc(request):
             "amount": PAID["amount_raw"],
             "confirmed": "true",
             "subtype": "send",
+            "local_timestamp": str(int(time.time())),
             "contents": {
                 "type": "state",
                 "link_as_account": NANO_ADDRESS,

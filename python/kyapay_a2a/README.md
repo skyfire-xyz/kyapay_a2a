@@ -381,7 +381,7 @@ and broadcasts the send block; a merchant asks its `rpc` for that block's
 `confirmed`, it is a send, its recipient and top-level `amount` match the
 advertised requirement exactly, and the block hash has not been used before
 (one block pays for one delivery). `settle` also refuses an expired
-requirement and settles each requirement once. A requirement is bound to its
+requirement and settles each requirement once. `settle` trusts the store's record of what it issued, not the dict the caller hands back (an edited id, address or amount is refused), and the block's own `local_timestamp` must fall between the issue and the expiry, so a late block for an expired requirement cannot pay a newer one that was given the same amount; a custom `OutstandingAmounts` must implement `issued_at`. A requirement is bound to its
 payment only by its exact amount at its address, so `requirement` reserves
 each amount in an `outstanding` store and re-draws on a collision (an amount
 is freed when its requirement settles or expires; one without an expiry holds
