@@ -16,8 +16,9 @@
 import httpx
 import requests
 import validators
-from jose import jwt
-from jose.exceptions import JWTError
+import jwt
+from jwt import PyJWKSet
+from jwt.exceptions import InvalidSignatureError, PyJWTError
 from decimal import Decimal, InvalidOperation
 import uuid
 import time
@@ -49,6 +50,16 @@ def _get_jwks(jwks_url: str = JWKS_URL):
     response = requests.get(jwks_url)
     response.raise_for_status()
     return response.json()
+
+
+def _decode_with_jwks(token: str, jwks: dict, **kwargs) -> dict:
+    """Decode with whichever JWKS key signed the token, so a token without a matching `kid` still verifies."""
+    for key in PyJWKSet.from_dict(jwks).keys:
+        try:
+            return jwt.decode(token, key, **kwargs)
+        except InvalidSignatureError:
+            continue
+    raise InvalidSignatureError("Signature verification failed")
 
 
 def _to_int(v):
@@ -182,7 +193,7 @@ async def verify_token(
     try:
 
         if audience:
-            payload = jwt.decode(
+            payload = _decode_with_jwks(
                 token.token,
                 jwks,
                 algorithms=ALGORITHMS,
@@ -190,7 +201,7 @@ async def verify_token(
                 audience=audience,
             )
         else:
-            payload = jwt.decode(
+            payload = _decode_with_jwks(
                 token.token,
                 jwks,
                 algorithms=ALGORITHMS,
@@ -222,7 +233,7 @@ async def verify_token(
                 invalid_reason=f"Invalid token type: expected {expected_typ}, got {typ}"
             )
 
-    except JWTError as err:
+    except PyJWTError as err:
         logger.error(f"JWT verification failed: {err}")
         return KyaPayVerifyResponse(
             is_valid=False,
