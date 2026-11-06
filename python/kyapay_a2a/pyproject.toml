@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 keywords = ["a2a", "kyapay", "payments", "skyfire"]
 dependencies = [
     "a2a-sdk>=0.1.0",  # For A2A protocol integration
-    "python-jose[cryptography]>=3.3.0",  # For JWT verification
+    "pyjwt[crypto]==2.15.1",  # For JWT verification
     "validators>=0.20.0",  # For email validation
     "httpx>=0.28.1",  # For async HTTP client
     "pydantic>=2.0.0",  # For data validation
